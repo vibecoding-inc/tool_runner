@@ -1,0 +1,156 @@
+name: Java Linter
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_repository:
+        description: 'Repository to run against (format: owner/repo)'
+        required: true
+        type: string
+        default: 'my-org/my-repo'
+      resumeUrl:
+        description: "Webhook URL"
+        required: true
+        type: string
+        default: 'https://example.org'
+
+jobs:
+  run-linter:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract Owner
+        id: parse_owner
+        run: |
+          REPO_INPUT="${{ inputs.target_repository }}"
+          echo "owner=${REPO_INPUT%%/*}" >> $GITHUB_OUTPUT
+
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ steps.parse_owner.outputs.owner }}
+
+      - name: Checkout Target Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.target_repository }}
+          token: ${{ steps.app-token.outputs.token }}
+          path: target-source
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Run Java Linters
+        id: linter
+        working-directory: ./target-source
+        run: |
+          set +e
+          echo "### Java Linter Report for ${{ inputs.target_repository }}" > ../report.txt
+          echo "Commit: $(git rev-parse --short HEAD)" >> ../report.txt
+          echo "" >> ../report.txt
+          
+          # Detect build system
+          if [ -f "pom.xml" ]; then
+            echo "#### Maven project detected" >> ../report.txt
+            echo "" >> ../report.txt
+            
+            # Run Checkstyle if configured
+            echo "##### Running Checkstyle..." >> ../report.txt
+            mvn checkstyle:check >> ../report.txt 2>&1
+            CHECKSTYLE_EXIT=$?
+            echo "" >> ../report.txt
+            
+            # Run SpotBugs if configured
+            echo "##### Running SpotBugs..." >> ../report.txt
+            mvn spotbugs:check >> ../report.txt 2>&1
+            SPOTBUGS_EXIT=$?
+            echo "" >> ../report.txt
+            
+            # Run PMD if configured
+            echo "##### Running PMD..." >> ../report.txt
+            mvn pmd:check >> ../report.txt 2>&1
+            PMD_EXIT=$?
+            echo "" >> ../report.txt
+            
+            EXIT_CODE=$((CHECKSTYLE_EXIT + SPOTBUGS_EXIT + PMD_EXIT))
+          elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+            echo "#### Gradle project detected" >> ../report.txt
+            echo "" >> ../report.txt
+            
+            # Run Checkstyle if configured
+            echo "##### Running Checkstyle..." >> ../report.txt
+            ./gradlew checkstyleMain checkstyleTest >> ../report.txt 2>&1
+            CHECKSTYLE_EXIT=$?
+            echo "" >> ../report.txt
+            
+            # Run SpotBugs if configured
+            echo "##### Running SpotBugs..." >> ../report.txt
+            ./gradlew spotbugsMain spotbugsTest >> ../report.txt 2>&1
+            SPOTBUGS_EXIT=$?
+            echo "" >> ../report.txt
+            
+            # Run PMD if configured
+            echo "##### Running PMD..." >> ../report.txt
+            ./gradlew pmdMain pmdTest >> ../report.txt 2>&1
+            PMD_EXIT=$?
+            echo "" >> ../report.txt
+            
+            EXIT_CODE=$((CHECKSTYLE_EXIT + SPOTBUGS_EXIT + PMD_EXIT))
+          else
+            echo "#### No Maven or Gradle build file detected" >> ../report.txt
+            echo "Searching for Java files to lint with basic checks..." >> ../report.txt
+            echo "" >> ../report.txt
+            
+            # Basic Java file check
+            JAVA_FILES=$(find . -name "*.java" | wc -l)
+            echo "Found $JAVA_FILES Java files" >> ../report.txt
+            echo "" >> ../report.txt
+            
+            EXIT_CODE=0
+          fi
+          
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "✅ All linters passed successfully" >> ../report.txt
+          else
+            echo "❌ Some linters reported issues" >> ../report.txt
+          fi
+          
+          exit $EXIT_CODE
+
+      - name: Upload Report Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: java-linter-report-file
+          path: report.txt
+          retention-days: 1
+
+  send-webhook:
+    needs: run-linter
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Report
+        uses: actions/download-artifact@v4
+        with:
+          name: java-linter-report-file
+          
+      - name: Send Summary to Webhook
+        run: |
+          if [ ! -f report.txt ]; then
+            echo "Critical Error: No report file found." > report.txt
+          fi
+
+          JSON_PAYLOAD=$(jq -n --rawfile val report.txt '{summary: $val}')
+          
+          echo "Sending payload to ${{ inputs.resumeUrl }}..."
+          
+          curl -X POST \
+            -H "Content-Type: application/json" \
+            -d "$JSON_PAYLOAD" \
+            "${{ inputs.resumeUrl }}"
