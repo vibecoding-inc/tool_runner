@@ -1,6 +1,6 @@
 # tool_runner
 
-A collection of GitHub Actions workflows for running linters and tests on Java and Go projects.
+A collection of GitHub Actions workflows for running linters and tests on Java, Go, and Python projects.
 
 ## Available Workflows
 
@@ -33,6 +33,22 @@ Runs Go tests with detailed reporting:
 - Generates coverage reports
 - Runs benchmarks
 - Supports Go modules
+
+### Python Workflows
+
+#### python-lint.yml
+Runs comprehensive Python linters:
+- **flake8**: Style guide enforcement and error detection
+- **pylint**: Static code analysis
+- **black**: Code formatting checker
+- **mypy**: Static type checking
+
+#### python-test.yml
+Runs Python tests with pytest:
+- Executes test suites with verbose output
+- Generates coverage reports
+- Supports requirements.txt, setup.py, and pyproject.toml
+- Installs dev/test dependencies automatically
 
 ## Workflow Interface
 
