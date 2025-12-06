@@ -9,7 +9,7 @@ on:
         type: string
         default: 'my-org/my-repo'
       resumeUrl:
-        description: "Webhook"
+        description: "Webhook URL"
         required: true
         type: string
         default: 'https://example.org'
@@ -19,33 +19,48 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Authenticate as a GitHub App to get an installation token
-      # You need to create a GitHub App and store the App ID and Private Key in Secrets
+      # 1. Parse Owner (Required if target repo is in a different org)
+      - name: Extract Owner
+        id: parse_owner
+        run: |
+          REPO_INPUT="${{ inputs.target_repository }}"
+          echo "owner=${REPO_INPUT%%/*}" >> $GITHUB_OUTPUT
+
+      # 2. Authenticate as a GitHub App
       - name: Generate GitHub App Token
         id: app-token
         uses: actions/create-github-app-token@v1
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          # Optional: If the target repo is in a different org, specify the owner here
-          owner: ${{ github.repository_owner }} 
+          owner: ${{ steps.parse_owner.outputs.owner }}
 
-      # 2. Checkout the TARGET repository using the App Token
+      # 3. Checkout the TARGET repository
       - name: Checkout Target Repository
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.target_repository }}
           token: ${{ steps.app-token.outputs.token }}
-          path: target-source  # Check out into a subfolder to keep things clean
+          path: target-source
 
-      # 3. Run your logic
+      # 4. Run Logic
       - name: Run Linter Logic
         working-directory: ./target-source
         run: |
           echo "Successfully checked out ${{ inputs.target_repository }}" >> $GITHUB_STEP_SUMMARY
           echo "Current commit: $(git rev-parse --short HEAD)" >> $GITHUB_STEP_SUMMARY
           echo "Cooler Linter Output" >> $GITHUB_STEP_SUMMARY
-          # ./run-my-linter.sh
 
-      - name: Continue
-        run: curl ${{ inputs.resumeUrl }}
+      # 5. POST to Webhook
+      - name: Send Summary to Webhook
+        run: |
+          # Use jq to safely serialize the file content to JSON
+          # --rawfile reads the file content directly into the 'val' variable, handling escaping automatically
+          JSON_PAYLOAD=$(jq -n --rawfile val $GITHUB_STEP_SUMMARY '{summary: $val}')
+          
+          echo "Sending payload to ${{ inputs.resumeUrl }}..."
+          
+          curl -X POST \
+            -H "Content-Type: application/json" \
+            -d "$JSON_PAYLOAD" \
+            "${{ inputs.resumeUrl }}"
