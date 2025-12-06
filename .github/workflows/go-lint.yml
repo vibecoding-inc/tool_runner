@@ -1,0 +1,158 @@
+name: Go Linter
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_repository:
+        description: 'Repository to run against (format: owner/repo)'
+        required: true
+        type: string
+        default: 'my-org/my-repo'
+      resumeUrl:
+        description: "Webhook URL"
+        required: true
+        type: string
+        default: 'https://example.org'
+
+permissions: {}
+
+jobs:
+  run-linter:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Extract Owner
+        id: parse_owner
+        run: |
+          REPO_INPUT="${{ inputs.target_repository }}"
+          echo "owner=${REPO_INPUT%%/*}" >> $GITHUB_OUTPUT
+
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ steps.parse_owner.outputs.owner }}
+
+      - name: Checkout Target Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.target_repository }}
+          token: ${{ steps.app-token.outputs.token }}
+          path: target-source
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Install golangci-lint
+        run: |
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.55.2
+
+      - name: Install staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+
+      - name: Run Go Linters
+        id: linter
+        working-directory: ./target-source
+        run: |
+          set +e
+          export PATH=$PATH:$(go env GOPATH)/bin
+          echo "### Go Linter Report for ${{ inputs.target_repository }}" > ../report.txt
+          echo "Commit: $(git rev-parse --short HEAD)" >> ../report.txt
+          echo "" >> ../report.txt
+          
+          # Check if this is a Go project
+          if [ ! -f "go.mod" ]; then
+            echo "#### No go.mod file found" >> ../report.txt
+            echo "This does not appear to be a Go project" >> ../report.txt
+            exit 1
+          fi
+          
+          echo "#### Go project detected" >> ../report.txt
+          echo "" >> ../report.txt
+          
+          # Track overall failure
+          OVERALL_EXIT=0
+          
+          # Run golangci-lint
+          echo "##### Running golangci-lint..." >> ../report.txt
+          golangci-lint run --timeout=5m ./... >> ../report.txt 2>&1
+          if [ $? -ne 0 ]; then
+            OVERALL_EXIT=1
+          fi
+          echo "" >> ../report.txt
+          
+          # Run go vet
+          echo "##### Running go vet..." >> ../report.txt
+          go vet ./... >> ../report.txt 2>&1
+          if [ $? -ne 0 ]; then
+            OVERALL_EXIT=1
+          fi
+          echo "" >> ../report.txt
+          
+          # Run go fmt check
+          echo "##### Checking go fmt..." >> ../report.txt
+          UNFORMATTED=$(gofmt -l .)
+          if [ -n "$UNFORMATTED" ]; then
+            echo "The following files are not formatted:" >> ../report.txt
+            echo "$UNFORMATTED" >> ../report.txt
+            OVERALL_EXIT=1
+          else
+            echo "All files are properly formatted" >> ../report.txt
+          fi
+          echo "" >> ../report.txt
+          
+          # Run staticcheck
+          echo "##### Running staticcheck..." >> ../report.txt
+          staticcheck ./... >> ../report.txt 2>&1
+          if [ $? -ne 0 ]; then
+            OVERALL_EXIT=1
+          fi
+          echo "" >> ../report.txt
+          
+          if [ $OVERALL_EXIT -eq 0 ]; then
+            echo "✅ All linters passed successfully" >> ../report.txt
+          else
+            echo "❌ Some linters reported issues" >> ../report.txt
+          fi
+          
+          exit $OVERALL_EXIT
+
+      - name: Upload Report Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-linter-report-file
+          path: report.txt
+          retention-days: 1
+
+  send-webhook:
+    needs: run-linter
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Download Report
+        uses: actions/download-artifact@v4
+        with:
+          name: go-linter-report-file
+          
+      - name: Send Summary to Webhook
+        run: |
+          if [ ! -f report.txt ]; then
+            echo "Critical Error: No report file found." > report.txt
+          fi
+
+          JSON_PAYLOAD=$(jq -n --rawfile val report.txt '{summary: $val}')
+          
+          echo "Sending payload to ${{ inputs.resumeUrl }}..."
+          
+          curl -X POST \
+            -H "Content-Type: application/json" \
+            -d "$JSON_PAYLOAD" \
+            "${{ inputs.resumeUrl }}"

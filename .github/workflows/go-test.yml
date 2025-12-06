@@ -1,0 +1,138 @@
+name: Go Test Runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_repository:
+        description: 'Repository to run against (format: owner/repo)'
+        required: true
+        type: string
+        default: 'my-org/my-repo'
+      resumeUrl:
+        description: "Webhook URL"
+        required: true
+        type: string
+        default: 'https://example.org'
+
+permissions: {}
+
+jobs:
+  run-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Extract Owner
+        id: parse_owner
+        run: |
+          REPO_INPUT="${{ inputs.target_repository }}"
+          echo "owner=${REPO_INPUT%%/*}" >> $GITHUB_OUTPUT
+
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ steps.parse_owner.outputs.owner }}
+
+      - name: Checkout Target Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.target_repository }}
+          token: ${{ steps.app-token.outputs.token }}
+          path: target-source
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Run Go Tests
+        id: test
+        working-directory: ./target-source
+        run: |
+          set +e
+          echo "### Go Test Report for ${{ inputs.target_repository }}" > ../report.txt
+          echo "Commit: $(git rev-parse --short HEAD)" >> ../report.txt
+          echo "" >> ../report.txt
+          
+          # Check if this is a Go project
+          if [ ! -f "go.mod" ]; then
+            echo "#### No go.mod file found" >> ../report.txt
+            echo "This does not appear to be a Go project" >> ../report.txt
+            exit 1
+          fi
+          
+          echo "#### Go project detected" >> ../report.txt
+          echo "" >> ../report.txt
+          
+          # Download dependencies
+          echo "##### Downloading dependencies..." >> ../report.txt
+          go mod download >> ../report.txt 2>&1
+          echo "" >> ../report.txt
+          
+          # Run tests with verbose output and coverage
+          echo "##### Running go test..." >> ../report.txt
+          go test -v -race -coverprofile=coverage.out -covermode=atomic ./... >> ../report.txt 2>&1
+          EXIT_CODE=$?
+          echo "" >> ../report.txt
+          
+          # Generate coverage report if tests passed
+          if [ -f "coverage.out" ]; then
+            echo "##### Coverage Report:" >> ../report.txt
+            go tool cover -func=coverage.out >> ../report.txt 2>&1
+            echo "" >> ../report.txt
+            
+            # Calculate total coverage
+            COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}')
+            echo "Total Coverage: $COVERAGE" >> ../report.txt
+            echo "" >> ../report.txt
+          fi
+          
+          # Run benchmarks if available
+          echo "##### Running benchmarks (if any)..." >> ../report.txt
+          go test -bench=. -benchmem ./... >> ../report.txt 2>&1
+          echo "" >> ../report.txt
+          
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "✅ All tests passed successfully" >> ../report.txt
+          else
+            echo "❌ Some tests failed" >> ../report.txt
+          fi
+          
+          exit $EXIT_CODE
+
+      - name: Upload Report Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-test-report-file
+          path: report.txt
+          retention-days: 1
+
+  send-webhook:
+    needs: run-tests
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Download Report
+        uses: actions/download-artifact@v4
+        with:
+          name: go-test-report-file
+          
+      - name: Send Summary to Webhook
+        run: |
+          if [ ! -f report.txt ]; then
+            echo "Critical Error: No report file found." > report.txt
+          fi
+
+          JSON_PAYLOAD=$(jq -n --rawfile val report.txt '{summary: $val}')
+          
+          echo "Sending payload to ${{ inputs.resumeUrl }}..."
+          
+          curl -X POST \
+            -H "Content-Type: application/json" \
+            -d "$JSON_PAYLOAD" \
+            "${{ inputs.resumeUrl }}"
