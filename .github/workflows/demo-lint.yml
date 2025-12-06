@@ -66,17 +66,8 @@ jobs:
           path: report.txt
           retention-days: 1
 
-  send-webhook:
-    needs: run-linter
-    if: always() # Läuft immer, egal ob 'run-linter' erfolgreich war oder nicht
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download Report
-        uses: actions/download-artifact@v4
-        with:
-          name: linter-report-file
-          
       - name: Send Summary to Webhook
+        if: always()
         run: |
           # Falls der erste Job komplett abgestürzt ist und kein File da ist:
           if [ ! -f report.txt ]; then
