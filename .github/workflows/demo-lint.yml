@@ -1,0 +1,43 @@
+name: CI with GitHub App Auth
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_repository:
+        description: 'Repository to run against (format: owner/repo)'
+        required: true
+        type: string
+        default: 'my-org/my-repo'
+
+jobs:
+  run-linter:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Authenticate as a GitHub App to get an installation token
+      # You need to create a GitHub App and store the App ID and Private Key in Secrets
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          # Optional: If the target repo is in a different org, specify the owner here
+          # owner: ${{ github.repository_owner }} 
+
+      # 2. Checkout the TARGET repository using the App Token
+      - name: Checkout Target Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.target_repository }}
+          token: ${{ steps.app-token.outputs.token }}
+          path: target-source  # Check out into a subfolder to keep things clean
+
+      # 3. Run your logic
+      - name: Run Linter Logic
+        working-directory: ./target-source
+        run: |
+          echo "Successfully checked out ${{ inputs.target_repository }}"
+          echo "Current commit: $(git rev-parse --short HEAD)"
+          echo "Cooler Linter Output"
+          # ./run-my-linter.sh
