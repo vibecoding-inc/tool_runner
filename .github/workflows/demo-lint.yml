@@ -17,16 +17,13 @@ on:
 jobs:
   run-linter:
     runs-on: ubuntu-latest
-
     steps:
-      # 1. Parse Owner (Required if target repo is in a different org)
       - name: Extract Owner
         id: parse_owner
         run: |
           REPO_INPUT="${{ inputs.target_repository }}"
           echo "owner=${REPO_INPUT%%/*}" >> $GITHUB_OUTPUT
 
-      # 2. Authenticate as a GitHub App
       - name: Generate GitHub App Token
         id: app-token
         uses: actions/create-github-app-token@v1
@@ -35,7 +32,6 @@ jobs:
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: ${{ steps.parse_owner.outputs.owner }}
 
-      # 3. Checkout the TARGET repository
       - name: Checkout Target Repository
         uses: actions/checkout@v4
         with:
@@ -43,20 +39,52 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           path: target-source
 
-      # 4. Run Logic
       - name: Run Linter Logic
+        id: linter
         working-directory: ./target-source
+        # Wir schreiben in eine Datei (report.txt), um sie später hochzuladen.
+        # "set +e" verhindert, dass das Skript sofort abbricht, wenn der Linter fehlschlägt,
+        # damit wir den Status noch in die Datei schreiben können.
         run: |
-          echo "Successfully checked out ${{ inputs.target_repository }}" >> $GITHUB_STEP_SUMMARY
-          echo "Current commit: $(git rev-parse --short HEAD)" >> $GITHUB_STEP_SUMMARY
-          echo "Cooler Linter Output" >> $GITHUB_STEP_SUMMARY
+          echo "### Linter Report for ${{ inputs.target_repository }}" > ../report.txt
+          echo "Commit: $(git rev-parse --short HEAD)" >> ../report.txt
+          echo "" >> ../report.txt
+          
+          # Hier würde der echte Linter laufen. 
+          # Wir simulieren Output:
+          echo "Cooler Linter Output" >> ../report.txt
+          
+          # Optional: Wenn der echte Linter Fehler wirft, hier abfangen, 
+          # in report.txt schreiben und dann exit code setzen.
+      
+      # WICHTIG: Dieser Schritt muss laufen, auch wenn der Linter oben fehlschlägt.
+      - name: Upload Report Artifact
+        if: always() 
+        uses: actions/upload-artifact@v4
+        with:
+          name: linter-report-file
+          path: report.txt
+          retention-days: 1
 
-      # 5. POST to Webhook
+  send-webhook:
+    needs: run-linter
+    if: always() # Läuft immer, egal ob 'run-linter' erfolgreich war oder nicht
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Report
+        uses: actions/download-artifact@v4
+        with:
+          name: linter-report-file
+          
       - name: Send Summary to Webhook
         run: |
-          # Use jq to safely serialize the file content to JSON
-          # --rawfile reads the file content directly into the 'val' variable, handling escaping automatically
-          JSON_PAYLOAD=$(jq -n --rawfile val $GITHUB_STEP_SUMMARY '{summary: $val}')
+          # Falls der erste Job komplett abgestürzt ist und kein File da ist:
+          if [ ! -f report.txt ]; then
+            echo "Critical Error: No report file found." > report.txt
+          fi
+
+          # jq liest report.txt sicher ein und escaped es für JSON
+          JSON_PAYLOAD=$(jq -n --rawfile val report.txt '{summary: $val}')
           
           echo "Sending payload to ${{ inputs.resumeUrl }}..."
           
