@@ -148,18 +148,8 @@ jobs:
           path: report.txt
           retention-days: 1
 
-  send-webhook:
-    needs: run-linter
-    if: always()
-    runs-on: ubuntu-latest
-    permissions: {}
-    steps:
-      - name: Download Report
-        uses: actions/download-artifact@v4
-        with:
-          name: java-linter-report-file
-          
       - name: Send Summary to Webhook
+        if: always()
         run: |
           if [ ! -f report.txt ]; then
             echo "Critical Error: No report file found." > report.txt
