@@ -23,7 +23,7 @@ jobs:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           # Optional: If the target repo is in a different org, specify the owner here
-          # owner: ${{ github.repository_owner }} 
+          owner: ${{ github.repository_owner }} 
 
       # 2. Checkout the TARGET repository using the App Token
       - name: Checkout Target Repository
