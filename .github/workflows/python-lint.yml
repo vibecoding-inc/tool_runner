@@ -96,7 +96,7 @@ jobs:
           
           # Run pylint
           echo "##### Running pylint..." >> ../report.txt
-          find . -name "*.py" -not -path "*/\.*" | xargs pylint --exit-zero >> ../report.txt 2>&1
+          find . -name "*.py" -not -path "*/\.*" | xargs pylint >> ../report.txt 2>&1
           if [ $? -ne 0 ]; then
             OVERALL_EXIT=1
           fi
