@@ -48,6 +48,10 @@ jobs:
         run: |
           go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.55.2
 
+      - name: Install staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+
       - name: Run Go Linters
         id: linter
         working-directory: ./target-source
@@ -98,10 +102,9 @@ jobs:
           fi
           echo "" >> ../report.txt
           
-          # Run staticcheck if available
+          # Run staticcheck
           echo "##### Running staticcheck..." >> ../report.txt
-          go install honnef.co/go/tools/cmd/staticcheck@latest
-          staticcheck ./... >> ../report.txt 2>&1
+          $(go env GOPATH)/bin/staticcheck ./... >> ../report.txt 2>&1
           if [ $? -ne 0 ]; then
             OVERALL_EXIT=1
           fi
