@@ -45,13 +45,8 @@ jobs:
           go-version: 'stable'
 
       - name: Install golangci-lint
-        uses: golangci/golangci-lint-action@v4
-        with:
-          version: v1.55.2
-          args: --version
-          working-directory: ./target-source
-          skip-cache: true
-          skip-build-cache: true
+        run: |
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.55.2
 
       - name: Run Go Linters
         id: linter
@@ -77,7 +72,7 @@ jobs:
           
           # Run golangci-lint
           echo "##### Running golangci-lint..." >> ../report.txt
-          golangci-lint run --timeout=5m ./... >> ../report.txt 2>&1
+          $(go env GOPATH)/bin/golangci-lint run --timeout=5m ./... >> ../report.txt 2>&1
           if [ $? -ne 0 ]; then
             OVERALL_EXIT=1
           fi
