@@ -79,6 +79,11 @@ jobs:
             echo "#### Gradle project detected" >> ../report.txt
             echo "" >> ../report.txt
             
+            # Make gradlew executable if it exists
+            if [ -f "./gradlew" ]; then
+              chmod +x ./gradlew
+            fi
+            
             echo "##### Running Gradle tests..." >> ../report.txt
             ./gradlew clean test >> ../report.txt 2>&1
             EXIT_CODE=$?

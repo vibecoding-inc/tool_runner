@@ -93,6 +93,11 @@ jobs:
             echo "#### Gradle project detected" >> ../report.txt
             echo "" >> ../report.txt
             
+            # Make gradlew executable if it exists
+            if [ -f "./gradlew" ]; then
+              chmod +x ./gradlew
+            fi
+            
             # Run Checkstyle if configured
             echo "##### Running Checkstyle..." >> ../report.txt
             ./gradlew checkstyleMain checkstyleTest >> ../report.txt 2>&1
