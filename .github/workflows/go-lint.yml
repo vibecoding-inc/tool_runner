@@ -14,9 +14,13 @@ on:
         type: string
         default: 'https://example.org'
 
+permissions: {}
+
 jobs:
   run-linter:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Extract Owner
         id: parse_owner
@@ -131,6 +135,7 @@ jobs:
     needs: run-linter
     if: always()
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
       - name: Download Report
         uses: actions/download-artifact@v4
