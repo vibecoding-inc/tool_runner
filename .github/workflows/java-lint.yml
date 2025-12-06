@@ -54,6 +54,9 @@ jobs:
           echo "Commit: $(git rev-parse --short HEAD)" >> ../report.txt
           echo "" >> ../report.txt
           
+          # Track overall failure
+          OVERALL_EXIT=0
+          
           # Detect build system
           if [ -f "pom.xml" ]; then
             echo "#### Maven project detected" >> ../report.txt
@@ -62,22 +65,26 @@ jobs:
             # Run Checkstyle if configured
             echo "##### Running Checkstyle..." >> ../report.txt
             mvn checkstyle:check >> ../report.txt 2>&1
-            CHECKSTYLE_EXIT=$?
+            if [ $? -ne 0 ]; then
+              OVERALL_EXIT=1
+            fi
             echo "" >> ../report.txt
             
             # Run SpotBugs if configured
             echo "##### Running SpotBugs..." >> ../report.txt
             mvn spotbugs:check >> ../report.txt 2>&1
-            SPOTBUGS_EXIT=$?
+            if [ $? -ne 0 ]; then
+              OVERALL_EXIT=1
+            fi
             echo "" >> ../report.txt
             
             # Run PMD if configured
             echo "##### Running PMD..." >> ../report.txt
             mvn pmd:check >> ../report.txt 2>&1
-            PMD_EXIT=$?
+            if [ $? -ne 0 ]; then
+              OVERALL_EXIT=1
+            fi
             echo "" >> ../report.txt
-            
-            EXIT_CODE=$((CHECKSTYLE_EXIT + SPOTBUGS_EXIT + PMD_EXIT))
           elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
             echo "#### Gradle project detected" >> ../report.txt
             echo "" >> ../report.txt
@@ -85,22 +92,26 @@ jobs:
             # Run Checkstyle if configured
             echo "##### Running Checkstyle..." >> ../report.txt
             ./gradlew checkstyleMain checkstyleTest >> ../report.txt 2>&1
-            CHECKSTYLE_EXIT=$?
+            if [ $? -ne 0 ]; then
+              OVERALL_EXIT=1
+            fi
             echo "" >> ../report.txt
             
             # Run SpotBugs if configured
             echo "##### Running SpotBugs..." >> ../report.txt
             ./gradlew spotbugsMain spotbugsTest >> ../report.txt 2>&1
-            SPOTBUGS_EXIT=$?
+            if [ $? -ne 0 ]; then
+              OVERALL_EXIT=1
+            fi
             echo "" >> ../report.txt
             
             # Run PMD if configured
             echo "##### Running PMD..." >> ../report.txt
             ./gradlew pmdMain pmdTest >> ../report.txt 2>&1
-            PMD_EXIT=$?
+            if [ $? -ne 0 ]; then
+              OVERALL_EXIT=1
+            fi
             echo "" >> ../report.txt
-            
-            EXIT_CODE=$((CHECKSTYLE_EXIT + SPOTBUGS_EXIT + PMD_EXIT))
           else
             echo "#### No Maven or Gradle build file detected" >> ../report.txt
             echo "Searching for Java files to lint with basic checks..." >> ../report.txt
@@ -110,17 +121,15 @@ jobs:
             JAVA_FILES=$(find . -name "*.java" | wc -l)
             echo "Found $JAVA_FILES Java files" >> ../report.txt
             echo "" >> ../report.txt
-            
-            EXIT_CODE=0
           fi
           
-          if [ $EXIT_CODE -eq 0 ]; then
+          if [ $OVERALL_EXIT -eq 0 ]; then
             echo "✅ All linters passed successfully" >> ../report.txt
           else
             echo "❌ Some linters reported issues" >> ../report.txt
           fi
           
-          exit $EXIT_CODE
+          exit $OVERALL_EXIT
 
       - name: Upload Report Artifact
         if: always()

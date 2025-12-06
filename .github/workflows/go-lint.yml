@@ -44,6 +44,15 @@ jobs:
         with:
           go-version: 'stable'
 
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: v1.55.2
+          args: --version
+          working-directory: ./target-source
+          skip-cache: true
+          skip-build-cache: true
+
       - name: Run Go Linters
         id: linter
         working-directory: ./target-source
@@ -63,22 +72,23 @@ jobs:
           echo "#### Go project detected" >> ../report.txt
           echo "" >> ../report.txt
           
-          # Install golangci-lint
-          echo "##### Installing golangci-lint..." >> ../report.txt
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.55.2
-          export PATH=$PATH:$(go env GOPATH)/bin
-          echo "" >> ../report.txt
+          # Track overall failure
+          OVERALL_EXIT=0
           
           # Run golangci-lint
           echo "##### Running golangci-lint..." >> ../report.txt
           golangci-lint run --timeout=5m ./... >> ../report.txt 2>&1
-          GOLANGCI_EXIT=$?
+          if [ $? -ne 0 ]; then
+            OVERALL_EXIT=1
+          fi
           echo "" >> ../report.txt
           
           # Run go vet
           echo "##### Running go vet..." >> ../report.txt
           go vet ./... >> ../report.txt 2>&1
-          VET_EXIT=$?
+          if [ $? -ne 0 ]; then
+            OVERALL_EXIT=1
+          fi
           echo "" >> ../report.txt
           
           # Run go fmt check
@@ -87,10 +97,9 @@ jobs:
           if [ -n "$UNFORMATTED" ]; then
             echo "The following files are not formatted:" >> ../report.txt
             echo "$UNFORMATTED" >> ../report.txt
-            FMT_EXIT=1
+            OVERALL_EXIT=1
           else
             echo "All files are properly formatted" >> ../report.txt
-            FMT_EXIT=0
           fi
           echo "" >> ../report.txt
           
@@ -98,18 +107,18 @@ jobs:
           echo "##### Running staticcheck..." >> ../report.txt
           go install honnef.co/go/tools/cmd/staticcheck@latest
           staticcheck ./... >> ../report.txt 2>&1
-          STATICCHECK_EXIT=$?
+          if [ $? -ne 0 ]; then
+            OVERALL_EXIT=1
+          fi
           echo "" >> ../report.txt
           
-          EXIT_CODE=$((GOLANGCI_EXIT + VET_EXIT + FMT_EXIT + STATICCHECK_EXIT))
-          
-          if [ $EXIT_CODE -eq 0 ]; then
+          if [ $OVERALL_EXIT -eq 0 ]; then
             echo "✅ All linters passed successfully" >> ../report.txt
           else
             echo "❌ Some linters reported issues" >> ../report.txt
           fi
           
-          exit $EXIT_CODE
+          exit $OVERALL_EXIT
 
       - name: Upload Report Artifact
         if: always()
