@@ -67,8 +67,8 @@ jobs:
             # Try to extract test summary
             if [ -d "target/surefire-reports" ]; then
               echo "##### Test Summary:" >> ../report.txt
-              find target/surefire-reports -name "*.xml" -exec grep -h '<testcase ' {} \; | wc -l | xargs echo "Total test cases:" >> ../report.txt
-              find target/surefire-reports -name "*.xml" -exec grep -h '<failure\|<error' {} \; | wc -l | xargs echo "Failed/Error test cases:" >> ../report.txt
+              find target/surefire-reports -name "*.xml" -exec grep -oh '<testcase[^>]*>' {} \; | wc -l | xargs echo "Total test cases:" >> ../report.txt
+              find target/surefire-reports -name "*.xml" -exec grep -oh '<\(failure\|error\)[^>]*>' {} \; | wc -l | xargs echo "Failed/Error test cases:" >> ../report.txt
               echo "" >> ../report.txt
             fi
           elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
@@ -83,8 +83,8 @@ jobs:
             # Try to extract test summary
             if [ -d "build/test-results" ]; then
               echo "##### Test Summary:" >> ../report.txt
-              find build/test-results -name "*.xml" -exec grep -h '<testcase ' {} \; | wc -l | xargs echo "Total test cases:" >> ../report.txt
-              find build/test-results -name "*.xml" -exec grep -h '<failure\|<error' {} \; | wc -l | xargs echo "Failed/Error test cases:" >> ../report.txt
+              find build/test-results -name "*.xml" -exec grep -oh '<testcase[^>]*>' {} \; | wc -l | xargs echo "Total test cases:" >> ../report.txt
+              find build/test-results -name "*.xml" -exec grep -oh '<\(failure\|error\)[^>]*>' {} \; | wc -l | xargs echo "Failed/Error test cases:" >> ../report.txt
               echo "" >> ../report.txt
             fi
           else
