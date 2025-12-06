@@ -37,7 +37,7 @@ jobs:
       - name: Run Linter Logic
         working-directory: ./target-source
         run: |
-          echo "Successfully checked out ${{ inputs.target_repository }}"
-          echo "Current commit: $(git rev-parse --short HEAD)"
-          echo "Cooler Linter Output"
+          echo "Successfully checked out ${{ inputs.target_repository }}" >> $GITHUB_STEP_SUMMARY
+          echo "Current commit: $(git rev-parse --short HEAD)" >> $GITHUB_STEP_SUMMARY
+          echo "Cooler Linter Output" >> $GITHUB_STEP_SUMMARY
           # ./run-my-linter.sh
