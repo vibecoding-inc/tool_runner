@@ -1,0 +1,151 @@
+name: Python Linter
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_repository:
+        description: 'Repository to run against (format: owner/repo)'
+        required: true
+        type: string
+        default: 'my-org/my-repo'
+      resumeUrl:
+        description: "Webhook URL"
+        required: true
+        type: string
+        default: 'https://example.org'
+
+permissions: {}
+
+jobs:
+  run-linter:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Extract Owner
+        id: parse_owner
+        run: |
+          REPO_INPUT="${{ inputs.target_repository }}"
+          echo "owner=${REPO_INPUT%%/*}" >> $GITHUB_OUTPUT
+
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ steps.parse_owner.outputs.owner }}
+
+      - name: Checkout Target Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.target_repository }}
+          token: ${{ steps.app-token.outputs.token }}
+          path: target-source
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install Python Linters
+        run: |
+          pip install flake8 pylint black mypy
+
+      - name: Run Python Linters
+        id: linter
+        working-directory: ./target-source
+        run: |
+          set +e
+          echo "### Python Linter Report for ${{ inputs.target_repository }}" > ../report.txt
+          echo "Commit: $(git rev-parse --short HEAD)" >> ../report.txt
+          echo "" >> ../report.txt
+          
+          # Check if this is a Python project
+          if [ ! -f "requirements.txt" ] && [ ! -f "setup.py" ] && [ ! -f "pyproject.toml" ] && [ ! -f "setup.cfg" ]; then
+            # Check if there are any Python files
+            PYTHON_FILES=$(find . -name "*.py" -not -path "*/\.*" | wc -l)
+            if [ "$PYTHON_FILES" -eq 0 ]; then
+              echo "#### No Python project files found" >> ../report.txt
+              echo "This does not appear to be a Python project" >> ../report.txt
+              exit 1
+            fi
+          fi
+          
+          echo "#### Python project detected" >> ../report.txt
+          echo "" >> ../report.txt
+          
+          # Install dependencies if requirements.txt exists
+          if [ -f "requirements.txt" ]; then
+            echo "##### Installing dependencies..." >> ../report.txt
+            pip install -r requirements.txt >> ../report.txt 2>&1
+            echo "" >> ../report.txt
+          fi
+          
+          # Track overall failure
+          OVERALL_EXIT=0
+          
+          # Run flake8
+          echo "##### Running flake8..." >> ../report.txt
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics >> ../report.txt 2>&1
+          if [ $? -ne 0 ]; then
+            OVERALL_EXIT=1
+          fi
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics >> ../report.txt 2>&1
+          echo "" >> ../report.txt
+          
+          # Run pylint
+          echo "##### Running pylint..." >> ../report.txt
+          find . -name "*.py" -not -path "*/\.*" | xargs pylint >> ../report.txt 2>&1
+          if [ $? -ne 0 ]; then
+            OVERALL_EXIT=1
+          fi
+          echo "" >> ../report.txt
+          
+          # Run black (check mode)
+          echo "##### Checking black formatting..." >> ../report.txt
+          black --check . >> ../report.txt 2>&1
+          if [ $? -ne 0 ]; then
+            OVERALL_EXIT=1
+          fi
+          echo "" >> ../report.txt
+          
+          # Run mypy
+          echo "##### Running mypy..." >> ../report.txt
+          mypy . --ignore-missing-imports >> ../report.txt 2>&1
+          if [ $? -ne 0 ]; then
+            OVERALL_EXIT=1
+          fi
+          echo "" >> ../report.txt
+          
+          if [ $OVERALL_EXIT -eq 0 ]; then
+            echo "✅ All linters passed successfully" >> ../report.txt
+          else
+            echo "❌ Some linters reported issues" >> ../report.txt
+          fi
+          
+          exit $OVERALL_EXIT
+
+      - name: Upload Report Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-linter-report-file
+          path: report.txt
+          retention-days: 1
+
+      - name: Send Summary to Webhook
+        if: always()
+        run: |
+          if [ ! -f report.txt ]; then
+            echo "Critical Error: No report file found." > report.txt
+          fi
+
+          JSON_PAYLOAD=$(jq -n --rawfile val report.txt '{summary: $val}')
+          
+          echo "Sending payload to ${{ inputs.resumeUrl }}..."
+          
+          curl -X POST \
+            -H "Content-Type: application/json" \
+            -d "$JSON_PAYLOAD" \
+            "${{ inputs.resumeUrl }}"
